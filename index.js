@@ -7,7 +7,7 @@ const BOT_OWNER_NAME = process.env.BOT_OWNER_NAME || "Victoire";
 const EMERGENCY_NUMBER = process.env.EMERGENCY_NUMBER || "+260969370276";
 
 // Cooldown: don't reply to same person more than once every X minutes
-const COOLDOWN_MINUTES = 30;
+const COOLDOWN_SECONDS = process.env.COOLDOWN_SECONDS ? parseInt(process.env.COOLDOWN_SECONDS) : 5;
 
 // ─── AUTO REPLY MESSAGES ───────────────────────────────────────────────────
 const OFFLINE_FR = `Salut ! 😊 ${BOT_OWNER_NAME} n'est pas disponible pour le moment.
@@ -59,7 +59,7 @@ function canReply(sender) {
   const now = Date.now();
   const last = lastReplied.get(sender);
   if (!last) return true;
-  return now - last > COOLDOWN_MINUTES * 60 * 1000;
+  return now - last > COOLDOWN_SECONDS * 1000;
 }
 
 // ─── WHATSAPP CLIENT ───────────────────────────────────────────────────────
@@ -93,7 +93,7 @@ client.on("ready", () => {
   console.log("\n✅ Bot connecté !");
   console.log(`📴 Auto-reply actif pour : ${BOT_OWNER_NAME}`);
   console.log(`🚨 Numéro d'urgence : ${EMERGENCY_NUMBER}`);
-  console.log(`⏱️  Cooldown : ${COOLDOWN_MINUTES} minutes par contact`);
+  console.log(`⏱️  Cooldown : ${COOLDOWN_SECONDS} secondes par contact`);
   console.log("─".repeat(40));
 });
 
