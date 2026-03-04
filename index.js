@@ -128,15 +128,21 @@ client.on("message", async (message) => {
     if (message.fromMe) {
       if (text === "!offline") {
         isOffline = true;
-        lastReplied.clear(); // reset cooldowns
-        await message.reply("📴 Mode hors ligne activé — je réponds automatiquement aux messages.");
+        lastReplied.clear();
+        const chat = await message.getChat();
+        await chat.sendMessage("📴 *Mode hors ligne activé*\nJe réponds automatiquement à tous tes messages.\n\nTape *!online* pour désactiver.");
         console.log("📴 Mode OFFLINE activé");
       } else if (text === "!online") {
         isOffline = false;
-        await message.reply("✅ Mode en ligne activé — je ne réponds plus automatiquement.");
+        const chat = await message.getChat();
+        await chat.sendMessage("✅ *Mode en ligne activé*\nJe ne réponds plus automatiquement.\n\nTape *!offline* pour réactiver.");
         console.log("✅ Mode ONLINE activé");
       } else if (text === "!status") {
-        await message.reply(isOffline ? "📴 Je suis en mode hors ligne" : "✅ Je suis en mode en ligne");
+        const chat = await message.getChat();
+        const status = isOffline
+          ? "📴 *Statut : Hors ligne*\nLe bot répond automatiquement aux messages."
+          : "✅ *Statut : En ligne*\nLe bot ne répond pas automatiquement.";
+        await chat.sendMessage(status + "\n\n*Commandes disponibles :*\n!offline — activer\n!online — désactiver\n!status — voir le statut");
       }
       return;
     }
