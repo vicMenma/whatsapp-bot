@@ -1,20 +1,17 @@
 const { Client, LocalAuth } = require("whatsapp-web.js");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const Groq = require("groq-sdk");
 const QRCode = require("qrcode");
 const http = require("http");
 
 // ─── CONFIG ────────────────────────────────────────────────────────────────
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const BOT_OWNER_NAME = process.env.BOT_OWNER_NAME || "Victoire";
 
-if (!GEMINI_API_KEY) {
-  console.error("❌ GEMINI_API_KEY is missing! Set it in Railway environment variables.");
+if (!GROQ_API_KEY) {
+  console.error("❌ GROQ_API_KEY is missing! Set it in Railway environment variables.");
   process.exit(1);
 }
 
-// Contacts whitelist — comma-separated numbers in env var
-// e.g. WHITELIST="33612345678,33698765432"
-// Leave empty to reply to everyone
 const WHITELIST = process.env.WHITELIST
   ? process.env.WHITELIST.split(",").map((n) => n.trim())
   : [];
@@ -40,14 +37,12 @@ Ton style de communication :
 Important : reste bref(ve) la plupart du temps. Les gens ne texte pas des paragraphes entiers à leurs amis.
 `;
 
-
 // ─── QR WEB SERVER ─────────────────────────────────────────────────────────
 let currentQR = null;
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer(async (req, res) => {
   if (currentQR) {
-    const QRCode = require("qrcode");
     const qrImage = await QRCode.toDataURL(currentQR, { width: 300 });
     res.writeHead(200, { "Content-Type": "text/html" });
     res.end(`<!DOCTYPE html><html><head><title>WhatsApp Bot QR</title><meta http-equiv="refresh" content="30"><style>body{font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;background:#111;color:#fff}img{border-radius:16px;border:4px solid #25D366}p{color:#aaa;font-size:14px;margin-top:16px}</style></head><body><h2>📱 Scanne avec WhatsApp</h2><img src="${qrImage}"/><p>Page rafraîchie toutes les 30s</p></body></html>`);
@@ -64,11 +59,7 @@ const conversationHistory = new Map();
 const MAX_HISTORY = 10;
 
 // ─── INIT CLIENTS ──────────────────────────────────────────────────────────
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({
-  model: "gemini-2.0-flash",
-  systemInstruction: SYSTEM_PROMPT,
-});
+const groq = new Groq({ apiKey: GROQ_API_KEY });
 
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: "./.wwebjs_auth" }),
@@ -94,7 +85,7 @@ client.on("qr", (qr) => {
 
 // ─── READY ─────────────────────────────────────────────────────────────────
 client.on("ready", () => {
-  currentQR = null; // Clear QR once connected
+  currentQR = null;
   console.log("\n✅ Bot WhatsApp connecté et prêt !");
   console.log(`🤖 Répond comme : ${BOT_OWNER_NAME}`);
   console.log(
@@ -127,33 +118,37 @@ client.on("message", async (message) => {
     const incomingText = message.body.trim();
     console.log(`\n📨 [${senderNumber}]: ${incomingText}`);
 
-    // Get or init conversation history for this contact
     if (!conversationHistory.has(sender)) {
       conversationHistory.set(sender, []);
     }
     const history = conversationHistory.get(sender);
 
-    // Show typing indicator
     const chat = await message.getChat();
     await chat.sendStateTyping();
 
-    // Build Gemini chat with history
-    const geminiChat = model.startChat({
-      history: history,
+    // Build messages array for Groq
+    const messages = [
+      { role: "system", content: SYSTEM_PROMPT },
+      ...history,
+      { role: "user", content: incomingText },
+    ];
+
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: messages,
+      max_tokens: 300,
+      temperature: 0.85,
     });
 
-    // Send message to Gemini
-    const result = await geminiChat.sendMessage(incomingText);
-    const reply = result.response.text().trim();
+    const reply = completion.choices[0].message.content.trim();
 
-    // Update history (Gemini format)
-    history.push({ role: "user", parts: [{ text: incomingText }] });
-    history.push({ role: "model", parts: [{ text: reply }] });
+    // Update history
+    history.push({ role: "user", content: incomingText });
+    history.push({ role: "assistant", content: reply });
 
     // Keep history bounded
     while (history.length > MAX_HISTORY * 2) history.splice(0, 2);
 
-    // Small human-like delay (1-3 seconds)
     const delay = 1000 + Math.random() * 2000;
     await new Promise((res) => setTimeout(res, delay));
 

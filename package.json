@@ -1,13 +1,13 @@
 {
   "name": "whatsapp-ai-bot",
   "version": "1.0.0",
-  "description": "WhatsApp bot powered by Gemini AI",
+  "description": "WhatsApp bot powered by Groq AI",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.15.0",
+    "groq-sdk": "^0.9.0",
     "qrcode": "^1.5.3",
     "whatsapp-web.js": "^1.23.0",
     "puppeteer": "^21.0.0"
