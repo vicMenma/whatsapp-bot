@@ -102,6 +102,21 @@ client.on("message", async (message) => {
   try {
     if (message.isStatus) return;
 
+    // Detect all media types
+    const typeMap = {
+      "ptt": "🎤 vocal",
+      "audio": "🎵 audio",
+      "image": "🖼️ photo",
+      "video": "🎥 vidéo",
+      "sticker": "🎭 sticker",
+      "gif": "🎞️ gif",
+      "document": "📄 document",
+      "location": "📍 localisation",
+      "contact": "👤 contact",
+    };
+    const isMedia = message.type in typeMap;
+    const mediaLabel = typeMap[message.type] || message.type;
+
     const sender = message.from;
     const isGroup = sender.includes("@g.us");
     if (isGroup) return;
@@ -129,7 +144,7 @@ client.on("message", async (message) => {
     // ── Auto-reply only when offline ────────────────────────────────────
     if (!isOffline) return;
 
-    console.log(`\n📨 Message de [${senderNumber}]: ${message.body}`);
+    console.log(`\n📨 [${senderNumber}]: ${isMedia ? mediaLabel : message.body}`);
 
     if (!canReply(sender)) {
       console.log(`⏭️  Cooldown actif pour ${senderNumber}, pas de réponse`);
@@ -137,7 +152,8 @@ client.on("message", async (message) => {
     }
 
     await new Promise((res) => setTimeout(res, 2000));
-    await message.reply(getOfflineMessage(message.body || ""));
+    const msgText = isMedia ? "" : (message.body || "");
+    await message.reply(getOfflineMessage(msgText));
     lastReplied.set(sender, Date.now());
     console.log(`✅ Auto-reply envoyé à ${senderNumber}`);
 
