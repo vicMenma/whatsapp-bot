@@ -1,13 +1,13 @@
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
-const Anthropic = require("@anthropic-ai/sdk");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 // ─── CONFIG ────────────────────────────────────────────────────────────────
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const BOT_OWNER_NAME = process.env.BOT_OWNER_NAME || "Victoire";
 
-if (!ANTHROPIC_API_KEY) {
-  console.error("❌ ANTHROPIC_API_KEY is missing! Set it in Railway environment variables.");
+if (!GEMINI_API_KEY) {
+  console.error("❌ GEMINI_API_KEY is missing! Set it in Railway environment variables.");
   process.exit(1);
 }
 
@@ -44,7 +44,11 @@ const conversationHistory = new Map();
 const MAX_HISTORY = 10;
 
 // ─── INIT CLIENTS ──────────────────────────────────────────────────────────
-const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({
+  model: "gemini-1.5-flash",
+  systemInstruction: SYSTEM_PROMPT,
+});
 
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: "./.wwebjs_auth" }),
@@ -103,32 +107,33 @@ client.on("message", async (message) => {
     const incomingText = message.body.trim();
     console.log(`\n📨 [${senderNumber}]: ${incomingText}`);
 
+    // Get or init conversation history for this contact
     if (!conversationHistory.has(sender)) {
       conversationHistory.set(sender, []);
     }
     const history = conversationHistory.get(sender);
 
-    history.push({ role: "user", content: incomingText });
-    while (history.length > MAX_HISTORY) history.shift();
-
+    // Show typing indicator
     const chat = await message.getChat();
     await chat.sendStateTyping();
 
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 300,
-      system: SYSTEM_PROMPT,
-      messages: history,
+    // Build Gemini chat with history
+    const geminiChat = model.startChat({
+      history: history,
     });
 
-    const reply = response.content
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("")
-      .trim();
+    // Send message to Gemini
+    const result = await geminiChat.sendMessage(incomingText);
+    const reply = result.response.text().trim();
 
-    history.push({ role: "assistant", content: reply });
+    // Update history (Gemini format)
+    history.push({ role: "user", parts: [{ text: incomingText }] });
+    history.push({ role: "model", parts: [{ text: reply }] });
 
+    // Keep history bounded
+    while (history.length > MAX_HISTORY * 2) history.splice(0, 2);
+
+    // Small human-like delay (1-3 seconds)
     const delay = 1000 + Math.random() * 2000;
     await new Promise((res) => setTimeout(res, delay));
 
