@@ -126,23 +126,35 @@ client.on("message", async (message) => {
 
     // ── Commands from yourself ──────────────────────────────────────────
     if (message.fromMe) {
+      const respond = async (msg) => {
+        try {
+          // Try replying directly to the message
+          await message.reply(msg);
+        } catch {
+          try {
+            // Fallback: send to the chat
+            const chat = await message.getChat();
+            await chat.sendMessage(msg);
+          } catch (e) {
+            console.log("📣 " + msg); // Last resort: just log it
+          }
+        }
+      };
+
       if (text === "!offline") {
         isOffline = true;
         lastReplied.clear();
-        const chat = await message.getChat();
-        await chat.sendMessage("📴 *Mode hors ligne activé*\nJe réponds automatiquement à tous tes messages.\n\nTape *!online* pour désactiver.");
         console.log("📴 Mode OFFLINE activé");
+        await respond("📴 *Mode hors ligne activé*\nJe réponds automatiquement à tous tes messages.\n\nTape *!online* pour désactiver.");
       } else if (text === "!online") {
         isOffline = false;
-        const chat = await message.getChat();
-        await chat.sendMessage("✅ *Mode en ligne activé*\nJe ne réponds plus automatiquement.\n\nTape *!offline* pour réactiver.");
         console.log("✅ Mode ONLINE activé");
+        await respond("✅ *Mode en ligne activé*\nJe ne réponds plus automatiquement.\n\nTape *!offline* pour réactiver.");
       } else if (text === "!status") {
-        const chat = await message.getChat();
         const status = isOffline
           ? "📴 *Statut : Hors ligne*\nLe bot répond automatiquement aux messages."
           : "✅ *Statut : En ligne*\nLe bot ne répond pas automatiquement.";
-        await chat.sendMessage(status + "\n\n*Commandes disponibles :*\n!offline — activer\n!online — désactiver\n!status — voir le statut");
+        await respond(status + "\n\n*Commandes :*\n!offline — activer\n!online — désactiver\n!status — voir le statut");
       }
       return;
     }
