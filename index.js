@@ -1,6 +1,7 @@
 const { Client, LocalAuth } = require("whatsapp-web.js");
-const qrcode = require("qrcode-terminal");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const QRCode = require("qrcode");
+const http = require("http");
 
 // ─── CONFIG ────────────────────────────────────────────────────────────────
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -39,6 +40,25 @@ Ton style de communication :
 Important : reste bref(ve) la plupart du temps. Les gens ne texte pas des paragraphes entiers à leurs amis.
 `;
 
+
+// ─── QR WEB SERVER ─────────────────────────────────────────────────────────
+let currentQR = null;
+const PORT = process.env.PORT || 3000;
+
+const server = http.createServer(async (req, res) => {
+  if (currentQR) {
+    const QRCode = require("qrcode");
+    const qrImage = await QRCode.toDataURL(currentQR, { width: 300 });
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end(`<!DOCTYPE html><html><head><title>WhatsApp Bot QR</title><meta http-equiv="refresh" content="30"><style>body{font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;background:#111;color:#fff}img{border-radius:16px;border:4px solid #25D366}p{color:#aaa;font-size:14px;margin-top:16px}</style></head><body><h2>📱 Scanne avec WhatsApp</h2><img src="${qrImage}"/><p>Page rafraîchie toutes les 30s</p></body></html>`);
+  } else {
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end("<!DOCTYPE html><html><head><meta http-equiv=refresh content=5></head><body style=background:#111;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:sans-serif><h2>✅ Bot connecté et actif !</h2></body></html>");
+  }
+});
+
+server.listen(PORT, () => console.log("🌐 QR page sur le port " + PORT));
+
 // ─── CONVERSATION MEMORY ───────────────────────────────────────────────────
 const conversationHistory = new Map();
 const MAX_HISTORY = 10;
@@ -68,13 +88,13 @@ const client = new Client({
 
 // ─── QR CODE ───────────────────────────────────────────────────────────────
 client.on("qr", (qr) => {
-  console.log("\n📱 Scanne ce QR code avec WhatsApp (Appareils liés) :\n");
-  qrcode.generate(qr, { small: true });
-  console.log("\n⚠️  QR visible dans Railway Logs → ouvre les logs pour scanner !\n");
+  currentQR = qr;
+  console.log("📱 Nouveau QR code généré — ouvre le lien Railway pour scanner !");
 });
 
 // ─── READY ─────────────────────────────────────────────────────────────────
 client.on("ready", () => {
+  currentQR = null; // Clear QR once connected
   console.log("\n✅ Bot WhatsApp connecté et prêt !");
   console.log(`🤖 Répond comme : ${BOT_OWNER_NAME}`);
   console.log(
