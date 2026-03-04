@@ -98,7 +98,7 @@ client.on("ready", () => {
 });
 
 // ─── MESSAGE HANDLER ───────────────────────────────────────────────────────
-client.on("message", async (message) => {
+client.on("message_create", async (message) => {
   try {
     if (message.isStatus) return;
 
