@@ -85,25 +85,26 @@ setInterval(async () => {
     console.log(`⏱ ${scheduledMessages.length} message(s) en attente...`);
   }
 
-  for (let i = scheduledMessages.length - 1; i >= 0; i--) {
-    const msg = scheduledMessages[i];
-    if (now >= msg.time) {
-      console.log(`📤 Envoi du message #${msg.id} à ${msg.to}...`);
-      try {
-        // Make sure the number is registered on WhatsApp first
-        const isRegistered = await client.isRegisteredUser(msg.to);
-        if (!isRegistered) {
-          console.error(`❌ Numéro non enregistré sur WhatsApp: ${msg.to}`);
-          scheduledMessages.splice(i, 1);
-          continue;
-        }
+  // Collect due messages in order (first scheduled = first sent)
+  const due = scheduledMessages.filter(m => now >= m.time);
+  due.sort((a, b) => a.id - b.id); // lowest ID = programmed first
+
+  for (const msg of due) {
+    console.log(`📤 Envoi du message #${msg.id} à ${msg.to}...`);
+    try {
+      const isRegistered = await client.isRegisteredUser(msg.to);
+      if (!isRegistered) {
+        console.error(`❌ Numéro non enregistré sur WhatsApp: ${msg.to}`);
+      } else {
         await client.sendMessage(msg.to, msg.message);
         console.log(`✅ Message #${msg.id} envoyé avec succès à ${msg.to}`);
-      } catch (e) {
-        console.error(`❌ Échec envoi message #${msg.id} à ${msg.to}: ${e.message}`);
       }
-      scheduledMessages.splice(i, 1);
+    } catch (e) {
+      console.error(`❌ Échec envoi message #${msg.id} à ${msg.to}: ${e.message}`);
     }
+    // Remove from array regardless of success
+    const idx = scheduledMessages.findIndex(m => m.id === msg.id);
+    if (idx > -1) scheduledMessages.splice(idx, 1);
   }
 }, 10 * 1000);
 
