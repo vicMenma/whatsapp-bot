@@ -7,11 +7,9 @@ const BOT_OWNER_NAME = process.env.BOT_OWNER_NAME || "Victoire";
 const EMERGENCY_NUMBER = process.env.EMERGENCY_NUMBER || "+260969370276";
 const COOLDOWN_SECONDS = process.env.COOLDOWN_SECONDS ? parseInt(process.env.COOLDOWN_SECONDS) : 5;
 
-// Auto schedule: bot activates between these hours (24h format)
 const AUTO_OFFLINE_START = process.env.AUTO_OFFLINE_START ? parseInt(process.env.AUTO_OFFLINE_START) : 23;
 const AUTO_OFFLINE_END = process.env.AUTO_OFFLINE_END ? parseInt(process.env.AUTO_OFFLINE_END) : 7;
 
-// Blacklist: comma-separated numbers e.g. "260123456789,260987654321"
 const BLACKLIST = process.env.BLACKLIST
   ? process.env.BLACKLIST.split(",").map((n) => n.trim())
   : [];
@@ -20,8 +18,9 @@ const BLACKLIST = process.env.BLACKLIST
 let isOffline = false;
 let autoScheduleEnabled = false;
 const lastReplied = new Map();
-const missedMessages = []; // { number, name, time, preview }
-const scheduledMessages = []; // { to, message, time }
+const missedMessages = [];
+const scheduledMessages = []; // { id, to, message, time }
+let scheduleIdCounter = 1;
 
 // ─── LANGUAGE DETECTION ────────────────────────────────────────────────────
 function detectLanguage(text) {
@@ -59,6 +58,13 @@ function formatTime(date) {
   return date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }
 
+// ─── NORMALIZE NUMBER → WhatsApp ID ────────────────────────────────────────
+function toWAId(raw) {
+  // Strip everything except digits
+  const digits = raw.replace(/\D/g, "");
+  return digits + "@c.us";
+}
+
 // ─── AUTO SCHEDULE CHECKER ─────────────────────────────────────────────────
 setInterval(() => {
   if (!autoScheduleEnabled) return;
@@ -70,24 +76,36 @@ setInterval(() => {
     isOffline = false;
     console.log("⏰ Auto-schedule: Mode ONLINE activé");
   }
-}, 60 * 1000); // check every minute
+}, 60 * 1000);
 
 // ─── SCHEDULED MESSAGES CHECKER ────────────────────────────────────────────
 setInterval(async () => {
   const now = Date.now();
+  if (scheduledMessages.length > 0) {
+    console.log(`⏱ ${scheduledMessages.length} message(s) en attente...`);
+  }
+
   for (let i = scheduledMessages.length - 1; i >= 0; i--) {
     const msg = scheduledMessages[i];
     if (now >= msg.time) {
+      console.log(`📤 Envoi du message #${msg.id} à ${msg.to}...`);
       try {
+        // Make sure the number is registered on WhatsApp first
+        const isRegistered = await client.isRegisteredUser(msg.to);
+        if (!isRegistered) {
+          console.error(`❌ Numéro non enregistré sur WhatsApp: ${msg.to}`);
+          scheduledMessages.splice(i, 1);
+          continue;
+        }
         await client.sendMessage(msg.to, msg.message);
-        console.log(`📤 Message programmé envoyé à ${msg.to}`);
+        console.log(`✅ Message #${msg.id} envoyé avec succès à ${msg.to}`);
       } catch (e) {
-        console.error("❌ Erreur message programmé:", e.message);
+        console.error(`❌ Échec envoi message #${msg.id} à ${msg.to}: ${e.message}`);
       }
       scheduledMessages.splice(i, 1);
     }
   }
-}, 10 * 1000); // check every 10 seconds
+}, 10 * 1000);
 
 // ─── QR WEB SERVER ─────────────────────────────────────────────────────────
 let currentQR = null;
@@ -180,7 +198,9 @@ client.on("message_create", async (message) => {
           `*!stats* — statistiques des messages\n` +
           `*!auto on/off* — horaires automatiques (${AUTO_OFFLINE_START}h-${AUTO_OFFLINE_END}h)\n` +
           `*!blacklist add/remove/list +260xxx* — gérer la blacklist\n` +
-          `*!schedule +260xxx HH:MM message* — programmer un message`
+          `*!schedule +260xxx HH:MM message* — programmer un message\n` +
+          `*!schedule list* — voir les messages programmés\n` +
+          `*!schedule cancel ID* — annuler un message programmé`
         );
 
       // !offline
@@ -204,7 +224,8 @@ client.on("message_create", async (message) => {
           `${state}\n\n` +
           `⏰ *Horaire auto :* ${auto}\n` +
           `🔕 *Blacklist :* ${BLACKLIST.length} contact(s)\n` +
-          `📨 *Messages manqués :* ${missedMessages.length}\n\n` +
+          `📨 *Messages manqués :* ${missedMessages.length}\n` +
+          `📅 *Messages programmés :* ${scheduledMessages.length}\n\n` +
           `Tape *!help* pour voir toutes les commandes.`
         );
 
@@ -268,26 +289,103 @@ client.on("message_create", async (message) => {
           await respond(`🔕 *Blacklist :*\n!blacklist list\n!blacklist add +260xxx\n!blacklist remove +260xxx`);
         }
 
-      // !schedule +260xxx HH:MM message
+      // ── !schedule ──────────────────────────────────────────────────────
       } else if (text.startsWith("!schedule")) {
-        const parts = message.body.trim().split(" ");
-        // !schedule +260xxx 14:30 Ton message ici
-        if (parts.length >= 4) {
-          const to = parts[1].replace("+", "") + "@c.us";
-          const timeParts = parts[2].split(":");
+        const rawBody = message.body.trim();
+        const parts = rawBody.split(" ");
+        const subCommand = parts[1] ? parts[1].toLowerCase() : "";
+
+        // !schedule list
+        if (subCommand === "list") {
+          if (scheduledMessages.length === 0) {
+            await respond("📅 Aucun message programmé.");
+          } else {
+            let list = `📅 *${scheduledMessages.length} message(s) programmé(s) :*\n\n`;
+            scheduledMessages.forEach((m) => {
+              const t = new Date(m.time);
+              list += `*#${m.id}* → +${m.to.replace("@c.us", "")} à ${formatTime(t)}\n"${m.message}"\n\n`;
+            });
+            await respond(list);
+          }
+
+        // !schedule cancel <id>
+        } else if (subCommand === "cancel") {
+          const id = parseInt(parts[2]);
+          const idx = scheduledMessages.findIndex((m) => m.id === id);
+          if (idx > -1) {
+            scheduledMessages.splice(idx, 1);
+            await respond(`✅ Message *#${id}* annulé.`);
+          } else {
+            await respond(`❌ Aucun message avec l'ID *#${id}* trouvé.`);
+          }
+
+        // !schedule +260xxx HH:MM message text
+        } else if (parts.length >= 4) {
+          const rawNumber = parts[1]; // e.g. +260969370276
+          const timeStr = parts[2];   // e.g. 22:23
+          const msgText = parts.slice(3).join(" ");
+
+          // Validate time format
+          const timeParts = timeStr.split(":");
           const scheduledHour = parseInt(timeParts[0]);
           const scheduledMin = parseInt(timeParts[1]);
-          const msg = parts.slice(3).join(" ");
 
+          if (
+            isNaN(scheduledHour) || isNaN(scheduledMin) ||
+            scheduledHour < 0 || scheduledHour > 23 ||
+            scheduledMin < 0 || scheduledMin > 59
+          ) {
+            await respond(`❌ Heure invalide: *${timeStr}*\nFormat attendu: *HH:MM* (ex: 14:30)`);
+            return;
+          }
+
+          if (!msgText) {
+            await respond(`❌ Message vide. Usage:\n!schedule +260xxx HH:MM Ton message ici`);
+            return;
+          }
+
+          // Build WhatsApp ID from number
+          const waId = toWAId(rawNumber);
+
+          // Calculate scheduled time
           const now = new Date();
           const scheduled = new Date();
           scheduled.setHours(scheduledHour, scheduledMin, 0, 0);
-          if (scheduled <= now) scheduled.setDate(scheduled.getDate() + 1);
 
-          scheduledMessages.push({ to, message: msg, time: scheduled.getTime() });
-          await respond(`📤 *Message programmé !*\nÀ : *${parts[1]}*\nHeure : *${parts[2]}*\nMessage : "${msg}"`);
+          // If time already passed today, schedule for tomorrow
+          if (scheduled.getTime() <= now.getTime()) {
+            scheduled.setDate(scheduled.getDate() + 1);
+          }
+
+          const minutesUntil = Math.round((scheduled.getTime() - now.getTime()) / 60000);
+          const id = scheduleIdCounter++;
+
+          scheduledMessages.push({
+            id,
+            to: waId,
+            message: msgText,
+            time: scheduled.getTime(),
+          });
+
+          console.log(`📅 Message #${id} programmé pour ${waId} à ${scheduled.toLocaleTimeString()} (dans ${minutesUntil} min)`);
+
+          await respond(
+            `✅ *Message programmé ! (#${id})*\n\n` +
+            `📱 À : *${rawNumber}*\n` +
+            `🕐 Heure : *${timeStr}*\n` +
+            `⏳ Dans : *${minutesUntil} minute(s)*\n` +
+            `💬 Message : "${msgText}"\n\n` +
+            `Tape *!schedule list* pour voir tous les messages programmés.\n` +
+            `Tape *!schedule cancel ${id}* pour annuler.`
+          );
+
         } else {
-          await respond(`📤 *Usage :*\n!schedule +260xxx HH:MM Ton message ici`);
+          await respond(
+            `📅 *Commandes schedule :*\n\n` +
+            `*!schedule +260xxx HH:MM message* — programmer\n` +
+            `*!schedule list* — voir la liste\n` +
+            `*!schedule cancel ID* — annuler`
+          );
         }
       }
 
@@ -295,14 +393,11 @@ client.on("message_create", async (message) => {
     }
 
     // ── Incoming messages ───────────────────────────────────────────────
-
-    // Blacklist check
     if (BLACKLIST.includes(senderNumber)) {
       console.log(`🔕 Blacklisté, ignoré : ${senderNumber}`);
       return;
     }
 
-    // Log missed message
     const contact = await message.getContact();
     const contactName = contact.pushname || contact.name || senderNumber;
     const preview = isMedia ? `[${typeMap[message.type]}]` : (message.body || "").substring(0, 50);
@@ -312,12 +407,10 @@ client.on("message_create", async (message) => {
       time: formatTime(new Date()),
       preview,
     });
-    // Keep max 100 missed messages
     if (missedMessages.length > 100) missedMessages.shift();
 
     console.log(`\n📨 [${senderNumber}] ${contactName}: ${preview}`);
 
-    // Auto-reply only when offline
     if (!isOffline) return;
 
     if (!canReply(sender)) {
